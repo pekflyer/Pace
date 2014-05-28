@@ -31,16 +31,22 @@ class PaceApp : public ci::app::AppBasic  {
 	 std::vector<MsKinect::Skeleton>	mSkeletons;
 	 ci::gl::TextureRef					mTextureDepth;
 	 void								onFrame(MsKinect::Frame frame, const MsKinect::DeviceOptions& deviceOptions);
+
 	 ci::gl::GlslProgRef				mShader;
 	 ci::gl::VboMeshRef					mVboMesh;
+	 ci::gl::TextureRef					mBackground;
 
-	 float					mFrameRate;
-	 float					mDepth;
-	 bool					mFullScreen;
-	 bool					mFullScreenPrev;
-	 int					mUserCount;
+	 float								mDepth;
+	 float								mFrameRate;
+	 bool								mFullScreen;
+	 bool								mFullScreenPrev;
+	 ci::params::InterfaceGlRef			mParams;
+	 float								mPointSize;
+	 bool								mRemoveBackground;
+	 bool								mRemoveBackgroundPrev;
+	 ci::Vec3f							mScale;
 
-	 ci::CameraPersp						mCamera;
+	 ci::CameraPersp					mCamera;
 	 ci::Vec3f							mEyePoint;
 	 ci::Vec3f							mLookAt;
 	 ci::Vec3f							mRotation;
@@ -51,13 +57,53 @@ class PaceApp : public ci::app::AppBasic  {
 void PaceApp::setup()
 {
 	mDevice = Device::create();
-	mDevice->connectEventHandler(&PaceApp::onFrame, this);
-	
+	mDevice->connectEventHandler(&PaceApp::onFrame, this);	
 	mDevice->removeBackground();
 	mDevice->enableUserColor(true);
 	mDevice->enableBinaryMode(true);
-	
+	mDevice->start(DeviceOptions().enableColor(false));
 
+	vector<uint32_t> vboIndices;
+	gl::VboMesh::Layout vboLayout;
+	vector<Vec3f> vboPositions;
+	vector<Vec2f> vboTexCoords;
+
+	vboLayout.setStaticIndices();
+	vboLayout.setStaticPositions();
+	vboLayout.setStaticTexCoords2d();
+
+	int32_t width = 640;
+	int32_t height = 480;
+	
+	for (int32_t x = 0; x < width; ++x) {
+		for (int32_t y = 0; y < height; ++y) {
+			vboIndices.push_back((uint32_t)(x * height + y));
+			vboTexCoords.push_back(Vec2f((float)x / (float)(width - 1), (float)y / (float)(height - 1)));
+			vboPositions.push_back(Vec3f(
+				(vboTexCoords.rbegin()->x * 2.0f - 1.0f) * (float)width,
+				(vboTexCoords.rbegin()->y * 2.0f - 1.0f) * (float)height,
+				0.0f));
+		}
+	}
+
+	mVboMesh = gl::VboMesh::create(vboPositions.size(), vboIndices.size(), vboLayout, GL_POINTS);
+	mVboMesh->bufferIndices(vboIndices);
+	mVboMesh->bufferPositions(vboPositions);
+	mVboMesh->bufferTexCoords2d(0, vboTexCoords);
+	mVboMesh->unbindBuffers();
+
+	//mBackground = gl::Texture::create(loadImage(loadResource(RES_IMAGE_BACKGROUND)));
+	//mBackground->setWrap(GL_REPEAT, GL_REPEAT);
+	//mBackground->setMinFilter(GL_LINEAR);
+	//mBackground->setMagFilter(GL_LINEAR);
+
+	mShader = gl::GlslProg::create(loadResource(RES_SHADER_USER_VERT), loadResource(RES_SHADER_USER_FRAG));
+
+	vboIndices.clear();
+	vboPositions.clear();
+	vboTexCoords.clear();
+
+	resize();
 	try {
 		mDevice->start(DeviceOptions().enableColor(false).enableSkeletonTracking(false).setDepthResolution(ImageResolution::NUI_IMAGE_RESOLUTION_80x60));
 	}
@@ -74,10 +120,14 @@ void PaceApp::setup()
 		console() << ex.what() << endl;
 	}
 
-	mFrameRate  = 0.0f;
-	mDepth		= 500.0f;
+	mDepth = 500.0f;
+	mFrameRate = 0.0f;
 	mFullScreen = false;
 	mFullScreenPrev = mFullScreen;
+	mPointSize = 20.0f;
+	mRemoveBackground = true;
+	mRemoveBackgroundPrev = mRemoveBackground;
+	mScale = Vec3f(1.0f, 1.0f, 5.0f);
 }
 void PaceApp::keyDown(KeyEvent event)
 {
@@ -108,7 +158,11 @@ void PaceApp::update()
 		setFullScreen(mFullScreen);
 		mFullScreenPrev = mFullScreen;
 	}
-
+	if (mRemoveBackground != mRemoveBackgroundPrev)
+	{
+		mDevice->removeBackground(mRemoveBackground);
+		mRemoveBackgroundPrev = mRemoveBackground;
+	}
 	if (!mDevice->isCapturing()) {
 		if (getElapsedFrames() % 90 == 0) {
 			mDevice->start();
@@ -121,9 +175,34 @@ void PaceApp::update()
 void PaceApp::draw()
 {
 	// clear out the window with black
-	gl::clear(ColorA(1.0f, 1.0f, 1.0f));
+	gl::clear(ColorAf::black(), true);
+
+	//gl::setMatrices(mCamera);
+	gl::color(ColorAf::white());
 
 
+	if (mTextureDepth && mVboMesh) {
+
+		gl::pushMatrices();
+		gl::scale(10.0f, 10.0f, 10.0f);
+		//gl::rotate(mRotation);
+
+		mTextureDepth->bind(0);
+		gl::draw(mTextureDepth);
+
+		/**mShader->bind();
+		mShader->uniform("depth", mDepth);
+		mShader->uniform("scale", mScale);
+		mShader->uniform("tex0", 0);
+
+		glPointSize(mPointSize);
+		gl::draw(mVboMesh);
+
+		*/
+		//mShader->unbind();
+		mTextureDepth->unbind();
+		gl::popMatrices();
+	}
 	
 }
 void PaceApp::shutdown()
